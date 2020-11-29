@@ -145,7 +145,7 @@ class DataGenerator:
         self.dataset_size = 0 # As long as we haven't loaded anything yet, the dataset size is zero.
         self.load_images_into_memory = load_images_into_memory
         self.images = None # The only way that this list will not stay `None` is if `load_images_into_memory == True`.
-
+        self.subs = None
         # `self.filenames` is a list containing all file names of the image samples (full paths).
         # Note that it does not contain the actual image files themselves. This list is one of the outputs of the parser methods.
         # In case you are loading an HDF5 dataset, this list will be `None`.
@@ -171,6 +171,9 @@ class DataGenerator:
                 for filename in it:
                     with Image.open(filename) as image:
                         self.images.append(np.array(image, dtype=np.uint8))
+                    with Image.open(filename[:-4]+'_sub.pgm' ) as sub:  # add subtractions mask into array subs
+                        self.subs.append(np.array(sub,dtype=np.uint8))
+                        
         else:
             self.filenames = None
 
@@ -215,6 +218,217 @@ class DataGenerator:
         else:
             self.hdf5_dataset = None
 
+    def create_hdf5_dataset(self,
+                            file_path='dataset.h5',
+                            resize=False,
+                            variable_image_size=True,
+                            verbose=True):
+        '''
+        Converts the currently loaded dataset into a HDF5 file. This HDF5 file contains all
+        images as uncompressed arrays in a contiguous block of memory, which allows for them
+        to be loaded faster. Such an uncompressed dataset, however, may take up considerably
+        more space on your hard drive than the sum of the source images in a compressed format
+        such as JPG or PNG.
+
+        It is recommended that you always convert the dataset into an HDF5 dataset if you
+        have enugh hard drive space since loading from an HDF5 dataset accelerates the data
+        generation noticeably.
+
+        Note that you must load a dataset (e.g. via one of the parser methods) before creating
+        an HDF5 dataset from it.
+
+        The created HDF5 dataset will remain open upon its creation so that it can be used right
+        away.
+
+        Arguments:
+            file_path (str, optional): The full file path under which to store the HDF5 dataset.
+                You can load this output file via the `DataGenerator` constructor in the future.
+            resize (tuple, optional): `False` or a 2-tuple `(height, width)` that represents the
+                target size for the images. All images in the dataset will be resized to this
+                target size before they will be written to the HDF5 file. If `False`, no resizing
+                will be performed.
+            variable_image_size (bool, optional): The only purpose of this argument is that its
+                value will be stored in the HDF5 dataset in order to be able to quickly find out
+                whether the images in the dataset all have the same size or not.
+            verbose (bool, optional): Whether or not prit out the progress of the dataset creation.
+
+        Returns:
+            None.
+        '''
+
+        self.hdf5_dataset_path = file_path
+
+        dataset_size = len(self.filenames) #  subtractions has the same length as filenames
+
+        # Create the HDF5 file.
+        hdf5_dataset = h5py.File(file_path, 'w')
+
+        # Create a few attributes that tell us what this dataset contains.
+        # The dataset will obviously always contain images, but maybe it will
+        # also contain labels, image IDs, etc.
+        hdf5_dataset.attrs.create(name='has_subtractions', data=False, shape=None, dtype=np.bool_) #subs
+        hdf5_dataset.attrs.create(name='has_labels', data=False, shape=None, dtype=np.bool_)
+        hdf5_dataset.attrs.create(name='has_image_ids', data=False, shape=None, dtype=np.bool_)
+        hdf5_dataset.attrs.create(name='has_eval_neutral', data=False, shape=None, dtype=np.bool_)
+        # It's useful to be able to quickly check whether the images in a dataset all
+        # have the same size or not, so add a boolean attribute for that.
+        if variable_image_size and not resize:
+            hdf5_dataset.attrs.create(name='variable_image_size', data=True, shape=None, dtype=np.bool_)
+        else:
+            hdf5_dataset.attrs.create(name='variable_image_size', data=False, shape=None, dtype=np.bool_)
+
+        # Create the dataset in which the images will be stored as flattened arrays.
+        # This allows us, among other things, to store images of variable size.
+        hdf5_images = hdf5_dataset.create_dataset(name='images',
+                                                  shape=(dataset_size,),
+                                                  maxshape=(None),
+                                                  dtype=h5py.special_dtype(vlen=np.uint8))
+
+        # Create the dataset that will hold the image heights, widths and channels that
+        # we need in order to reconstruct the images from the flattened arrays later.
+        hdf5_image_shapes = hdf5_dataset.create_dataset(name='image_shapes',
+                                                        shape=(dataset_size, 3),
+                                                        maxshape=(None, 3),
+                                                        dtype=np.int32)
+
+        if not (self.subs is None): # refer to subtraction
+
+            # Create the dataset in which the labels will be stored as flattened arrays.
+            hdf5_subs = hdf5_dataset.create_dataset(name='subs',
+                                                      shape=(dataset_size,),
+                                                      maxshape=(None),
+                                                      dtype=h5py.special_dtype(vlen=np.int32))
+
+            # Create the dataset that will hold the dimensions of the labels arrays for
+            # each image so that we can restore the labels from the flattened arrays later.
+            hdf5_subs_shapes = hdf5_dataset.create_dataset(name='sub_shapes',
+                                                            shape=(dataset_size, 3),
+                                                            maxshape=(None, 3),
+                                                            dtype=np.int32)
+
+            hdf5_dataset.attrs.modify(name='has_subs', value=True)
+
+        if not (self.labels is None):
+
+            # Create the dataset in which the labels will be stored as flattened arrays.
+            hdf5_labels = hdf5_dataset.create_dataset(name='labels',
+                                                      shape=(dataset_size,),
+                                                      maxshape=(None),
+                                                      dtype=h5py.special_dtype(vlen=np.int32))
+
+            # Create the dataset that will hold the dimensions of the labels arrays for
+            # each image so that we can restore the labels from the flattened arrays later.
+            hdf5_label_shapes = hdf5_dataset.create_dataset(name='label_shapes',
+                                                            shape=(dataset_size, 2),
+                                                            maxshape=(None, 2),
+                                                            dtype=np.int32)
+
+            hdf5_dataset.attrs.modify(name='has_labels', value=True)
+
+        if not (self.image_ids is None):
+
+            hdf5_image_ids = hdf5_dataset.create_dataset(name='image_ids',
+                                                         shape=(dataset_size,),
+                                                         maxshape=(None),
+                                                         dtype=h5py.special_dtype(vlen=str))
+
+            hdf5_dataset.attrs.modify(name='has_image_ids', value=True)
+
+        if not (self.eval_neutral is None):
+
+            # Create the dataset in which the labels will be stored as flattened arrays.
+            hdf5_eval_neutral = hdf5_dataset.create_dataset(name='eval_neutral',
+                                                            shape=(dataset_size,),
+                                                            maxshape=(None),
+                                                            dtype=h5py.special_dtype(vlen=np.bool_))
+
+            hdf5_dataset.attrs.modify(name='has_eval_neutral', value=True)
+
+        if verbose:
+            tr = trange(dataset_size, desc='Creating HDF5 dataset', file=sys.stdout)
+        else:
+            tr = range(dataset_size)
+
+        # Iterate over all images in the dataset.
+        for i in tr:
+
+            # Store the image.
+            with Image.open(self.filenames[i]) as image:
+
+                image = np.asarray(image, dtype=np.uint8)
+
+                # Make sure all images end up having three channels.
+                if image.ndim == 2:
+                    image = np.stack([image] * 3, axis=-1)
+                elif image.ndim == 3:
+                    if image.shape[2] == 1:
+                        image = np.concatenate([image] * 3, axis=-1)
+                    elif image.shape[2] == 4:
+                        image = image[:,:,:3]
+
+                if resize:
+                    image = cv2.resize(image, dsize=(resize[1], resize[0]))
+
+                # Flatten the image array and write it to the images dataset.
+                hdf5_images[i] = image.reshape(-1)
+                # Write the image's shape to the image shapes dataset.
+                hdf5_image_shapes[i] = image.shape
+
+
+            # Store subtractions
+            if not (self.subtractions is None):
+
+
+                with Image.open(self.subtractions[i]) as sub:
+
+                sub = np.asarray(sub, dtype=np.uint8)
+
+                # Make sure all images end up having three channels.
+                # if image.ndim == 2:
+                #     image = np.stack([image] * 3, axis=-1)
+                # elif image.ndim == 3:
+                #     if image.shape[2] == 1:
+                #         image = np.concatenate([image] * 3, axis=-1)
+                #     elif image.shape[2] == 4:
+                #         image = image[:,:,:3]
+
+                if resize:
+                    sub = cv2.resize(sub, dsize=(resize[1], resize[0]))
+
+                # Flatten the image array and write it to the images dataset.
+                hdf5_subs[i] = sub.reshape(-1)
+                # Write the image's shape to the image shapes dataset.
+                hdf5_sub_shapes[i] = sub.shape
+
+
+            # Store the ground truth if we have any.
+            if not (self.labels is None):
+
+                labels = np.asarray(self.labels[i])
+                # Flatten the labels array and write it to the labels dataset.
+                hdf5_labels[i] = labels.reshape(-1)
+                # Write the labels' shape to the label shapes dataset.
+                hdf5_label_shapes[i] = labels.shape
+
+            # Store the image ID if we have one.
+            if not (self.image_ids is None):
+
+                hdf5_image_ids[i] = self.image_ids[i]
+
+            # Store the evaluation-neutrality annotations if we have any.
+            if not (self.eval_neutral is None):
+
+                hdf5_eval_neutral[i] = self.eval_neutral[i]
+
+        hdf5_dataset.close()
+        self.hdf5_dataset = h5py.File(file_path, 'r')
+        self.hdf5_dataset_path = file_path
+        self.dataset_size = len(self.hdf5_dataset['images'])
+        self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32) # Instead of shuffling the HDF5 dataset, we will shuffle this index list.
+
+
+
+
     def load_hdf5_dataset(self, verbose=True):
         '''
         Loads an HDF5 dataset that is in the format that the `create_hdf5_dataset()` method
@@ -238,6 +452,16 @@ class DataGenerator:
             else: tr = range(self.dataset_size)
             for i in tr:
                 self.images.append(self.hdf5_dataset['images'][i].reshape(self.hdf5_dataset['image_shapes'][i]))
+
+        #add subtractions
+        if self.hdf5_dataset.attrs['has_subs']:
+            self.subs = []
+            subs = self.hdf5_dataset['subs']
+            sub_shapes = self.hdf5_dataset['sub_shapes']
+            if verbose: tr = trange(self.dataset_size, desc='Loading subtractions', file=sys.stdout)
+            else: tr = range(self.dataset_size)
+            for i in tr:
+                self.subs.append(subs[i].reshape(sub_shapes[i]))
 
         if self.hdf5_dataset.attrs['has_labels']:
             self.labels = []
@@ -264,139 +488,8 @@ class DataGenerator:
             for i in tr:
                 self.eval_neutral.append(eval_neutral[i])
 
-    def parse_csv(self,
-                  images_dir,
-                  labels_filename,
-                  input_format,
-                  include_classes='all',
-                  random_sample=False,
-                  ret=False,
-                  verbose=True):
-        '''
-        Arguments:
-            images_dir (str): The path to the directory that contains the images.
-            labels_filename (str): The filepath to a CSV file that contains one ground truth bounding box per line
-                and each line contains the following six items: image file name, class ID, xmin, xmax, ymin, ymax.
-                The six items do not have to be in a specific order, but they must be the first six columns of
-                each line. The order of these items in the CSV file must be specified in `input_format`.
-                The class ID is an integer greater than zero. Class ID 0 is reserved for the background class.
-                `xmin` and `xmax` are the left-most and right-most absolute horizontal coordinates of the box,
-                `ymin` and `ymax` are the top-most and bottom-most absolute vertical coordinates of the box.
-                The image name is expected to be just the name of the image file without the directory path
-                at which the image is located.
-            input_format (list): A list of six strings representing the order of the six items
-                image file name, class ID, xmin, xmax, ymin, ymax in the input CSV file. The expected strings
-                are 'image_name', 'xmin', 'xmax', 'ymin', 'ymax', 'class_id'.
-            include_classes (list, optional): Either 'all' or a list of integers containing the class IDs that
-                are to be included in the dataset. If 'all', all ground truth boxes will be included in the dataset.
-            random_sample (float, optional): Either `False` or a float in `[0,1]`. If this is `False`, the
-                full dataset will be used by the generator. If this is a float in `[0,1]`, a randomly sampled
-                fraction of the dataset will be used, where `random_sample` is the fraction of the dataset
-                to be used. For example, if `random_sample = 0.2`, 20 precent of the dataset will be randomly selected,
-                the rest will be ommitted. The fraction refers to the number of images, not to the number
-                of boxes, i.e. each image that will be added to the dataset will always be added with all
-                of its boxes.
-            ret (bool, optional): Whether or not to return the outputs of the parser.
-            verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
-
-        Returns:
-            None by default, optionally lists for whichever are available of images, image filenames, labels, and image IDs.
-        '''
-
-        # Set class members.
-        self.images_dir = images_dir
-        self.labels_filename = labels_filename
-        self.input_format = input_format
-        self.include_classes = include_classes
-
-        # Before we begin, make sure that we have a labels_filename and an input_format
-        if self.labels_filename is None or self.input_format is None:
-            raise ValueError("`labels_filename` and/or `input_format` have not been set yet. You need to pass them as arguments.")
-
-        # Erase data that might have been parsed before
-        self.filenames = []
-        self.image_ids = []
-        self.labels = []
-
-        # First, just read in the CSV file lines and sort them.
-
-        data = []
-
-        with open(self.labels_filename, newline='') as csvfile:
-            csvread = csv.reader(csvfile, delimiter=',')
-            next(csvread) # Skip the header row.
-            for row in csvread: # For every line (i.e for every bounding box) in the CSV file...
-                if self.include_classes == 'all' or int(row[self.input_format.index('class_id')].strip()) in self.include_classes: # If the class_id is among the classes that are to be included in the dataset...
-                    box = [] # Store the box class and coordinates here
-                    box.append(row[self.input_format.index('image_name')].strip()) # Select the image name column in the input format and append its content to `box`
-                    for element in self.labels_output_format: # For each element in the output format (where the elements are the class ID and the four box coordinates)...
-                        box.append(int(row[self.input_format.index(element)].strip())) # ...select the respective column in the input format and append it to `box`.
-                    data.append(box)
-
-        data = sorted(data) # The data needs to be sorted, otherwise the next step won't give the correct result
-
-        # Now that we've made sure that the data is sorted by file names,
-        # we can compile the actual samples and labels lists
-
-        current_file = data[0][0] # The current image for which we're collecting the ground truth boxes
-        current_image_id = data[0][0].split('.')[0] # The image ID will be the portion of the image name before the first dot.
-        current_labels = [] # The list where we collect all ground truth boxes for a given image
-        add_to_dataset = False
-        for i, box in enumerate(data):
-
-            if box[0] == current_file: # If this box (i.e. this line of the CSV file) belongs to the current image file
-                current_labels.append(box[1:])
-                if i == len(data)-1: # If this is the last line of the CSV file
-                    if random_sample: # In case we're not using the full dataset, but a random sample of it.
-                        p = np.random.uniform(0,1)
-                        if p >= (1-random_sample):
-                            self.labels.append(np.stack(current_labels, axis=0))
-                            self.filenames.append(os.path.join(self.images_dir, current_file))
-                            self.image_ids.append(current_image_id)
-                    else:
-                        self.labels.append(np.stack(current_labels, axis=0))
-                        self.filenames.append(os.path.join(self.images_dir, current_file))
-                        self.image_ids.append(current_image_id)
-            else: # If this box belongs to a new image file
-                if random_sample: # In case we're not using the full dataset, but a random sample of it.
-                    p = np.random.uniform(0,1)
-                    if p >= (1-random_sample):
-                        self.labels.append(np.stack(current_labels, axis=0))
-                        self.filenames.append(os.path.join(self.images_dir, current_file))
-                        self.image_ids.append(current_image_id)
-                else:
-                    self.labels.append(np.stack(current_labels, axis=0))
-                    self.filenames.append(os.path.join(self.images_dir, current_file))
-                    self.image_ids.append(current_image_id)
-                current_labels = [] # Reset the labels list because this is a new file.
-                current_file = box[0]
-                current_image_id = box[0].split('.')[0]
-                current_labels.append(box[1:])
-                if i == len(data)-1: # If this is the last line of the CSV file
-                    if random_sample: # In case we're not using the full dataset, but a random sample of it.
-                        p = np.random.uniform(0,1)
-                        if p >= (1-random_sample):
-                            self.labels.append(np.stack(current_labels, axis=0))
-                            self.filenames.append(os.path.join(self.images_dir, current_file))
-                            self.image_ids.append(current_image_id)
-                    else:
-                        self.labels.append(np.stack(current_labels, axis=0))
-                        self.filenames.append(os.path.join(self.images_dir, current_file))
-                        self.image_ids.append(current_image_id)
-
-        self.dataset_size = len(self.filenames)
-        self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32)
-        if self.load_images_into_memory:
-            self.images = []
-            if verbose: it = tqdm(self.filenames, desc='Loading images into memory', file=sys.stdout)
-            else: it = self.filenames
-            for filename in it:
-                with Image.open(filename) as image:
-                    self.images.append(np.array(image, dtype=np.uint8))
-
-        if ret: # In case we want to return these
-            return self.images, self.filenames, self.labels, self.image_ids
-
+    
+    #update parser for back ground subtraction picture 
     def parse_xml(self,
                   images_dirs,
                   image_set_filenames,
@@ -437,7 +530,6 @@ class DataGenerator:
             exclude_truncated (bool, optional): If `True`, excludes boxes that are labeled as 'truncated'.
             exclude_difficult (bool, optional): If `True`, excludes boxes that are labeled as 'difficult'.
             ret (bool, optional): Whether or not to return the outputs of the parser.
-            verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
 
         Returns:
             None by default, optionally lists for whichever are available of images, image filenames, labels, image IDs,
@@ -454,6 +546,7 @@ class DataGenerator:
         self.filenames = []
         self.image_ids = []
         self.labels = []
+        self.subtractions = [] # add subtraction list
         self.eval_neutral = []
         if not annotations_dirs:
             self.labels = None
@@ -466,14 +559,16 @@ class DataGenerator:
                 image_ids = [line.strip() for line in f] # Note: These are strings, not integers.
                 self.image_ids += image_ids
 
-            if verbose: it = tqdm(image_ids, desc="Processing image set '{}'".format(os.path.basename(image_set_filename)), file=sys.stdout)
+            if verbose: it = (image_ids, desc="Processing image set '{}'".format(os.path.basename(image_set_filename)), file=sys.stdout)
             else: it = image_ids
 
             # Loop over all images in this dataset.
             for image_id in it:
 
-                filename = '{}'.format(image_id) + '.pgm'#改变为pgm
+                filename = '{}'.format(image_id) + '.pgm' #改变为pgm
+                subtraction = '{}'.format(image_id) + '_sub.pgm' # set id of subtraction masks
                 self.filenames.append(os.path.join(images_dir, filename))
+                self.subtractions.append(os.path.join(images_dir, subtraction))  # add background subtraction image
 
                 if not annotations_dir is None:
                     # Parse the XML file for this image.
@@ -542,298 +637,20 @@ class DataGenerator:
             for filename in it:
                 with Image.open(filename) as image:
                     self.images.append(np.array(image, dtype=np.uint8))
+            # also load subtraction into memory
+            self.subs = []
+            if verbose: it = tqdm(self.subtractions, desc='Loading subtractions into memory', file=sys.stdout)
+            else: it = self.subtractions
+            for subtraction in it:
+                with Image.open(subtraction) as image:
+                    self.subs.append(np.array(image, dtype=np.uint8)) # the array subs contains the subtraction images
+
 
         if ret:
-            return self.images, self.filenames, self.labels, self.image_ids, self.eval_neutral
+            return self.images, self.filenames, self.labels, self.image_ids, self.eval_neutral, self.subtractions # the subtractions locate at the end of the return information
 
-    def parse_json(self,
-                   images_dirs,
-                   annotations_filenames,
-                   ground_truth_available=False,
-                   include_classes='all',
-                   ret=False,
-                   verbose=True):
-        '''
-        This is an JSON parser for the MS COCO datasets. It might be applicable to other datasets with minor changes to
-        the code, but in its current form it expects the JSON format of the MS COCO datasets.
-
-        Arguments:
-            images_dirs (list, optional): A list of strings, where each string is the path of a directory that
-                contains images that are to be part of the dataset. This allows you to aggregate multiple datasets
-                into one (e.g. one directory that contains the images for MS COCO Train 2014, another one for MS COCO
-                Val 2014, another one for MS COCO Train 2017 etc.).
-            annotations_filenames (list): A list of strings, where each string is the path of the JSON file
-                that contains the annotations for the images in the respective image directories given, i.e. one
-                JSON file per image directory that contains the annotations for all images in that directory.
-                The content of the JSON files must be in MS COCO object detection format. Note that these annotations
-                files do not necessarily need to contain ground truth information. MS COCO also provides annotations
-                files without ground truth information for the test datasets, called `image_info_[...].json`.
-            ground_truth_available (bool, optional): Set `True` if the annotations files contain ground truth information.
-            include_classes (list, optional): Either 'all' or a list of integers containing the class IDs that
-                are to be included in the dataset. If 'all', all ground truth boxes will be included in the dataset.
-            ret (bool, optional): Whether or not to return the outputs of the parser.
-            verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
-
-        Returns:
-            None by default, optionally lists for whichever are available of images, image filenames, labels and image IDs.
-        '''
-        self.images_dirs = images_dirs
-        self.annotations_filenames = annotations_filenames
-        self.include_classes = include_classes
-        # Erase data that might have been parsed before.
-        self.filenames = []
-        self.image_ids = []
-        self.labels = []
-        if not ground_truth_available:
-            self.labels = None
-
-        # Build the dictionaries that map between class names and class IDs.
-        with open(annotations_filenames[0], 'r') as f:
-            annotations = json.load(f)
-        # Unfortunately the 80 MS COCO class IDs are not all consecutive. They go
-        # from 1 to 90 and some numbers are skipped. Since the IDs that we feed
-        # into a neural network must be consecutive, we'll save both the original
-        # (non-consecutive) IDs as well as transformed maps.
-        # We'll save both the map between the original
-        self.cats_to_names = {} # The map between class names (values) and their original IDs (keys)
-        self.classes_to_names = [] # A list of the class names with their indices representing the transformed IDs
-        self.classes_to_names.append('background') # Need to add the background class first so that the indexing is right.
-        self.cats_to_classes = {} # A dictionary that maps between the original (keys) and the transformed IDs (values)
-        self.classes_to_cats = {} # A dictionary that maps between the transformed (keys) and the original IDs (values)
-        for i, cat in enumerate(annotations['categories']):
-            self.cats_to_names[cat['id']] = cat['name']
-            self.classes_to_names.append(cat['name'])
-            self.cats_to_classes[cat['id']] = i + 1
-            self.classes_to_cats[i + 1] = cat['id']
-
-        # Iterate over all datasets.
-        for images_dir, annotations_filename in zip(self.images_dirs, self.annotations_filenames):
-            # Load the JSON file.
-            with open(annotations_filename, 'r') as f:
-                annotations = json.load(f)
-
-            if ground_truth_available:
-                # Create the annotations map, a dictionary whose keys are the image IDs
-                # and whose values are the annotations for the respective image ID.
-                image_ids_to_annotations = defaultdict(list)
-                for annotation in annotations['annotations']:
-                    image_ids_to_annotations[annotation['image_id']].append(annotation)
-
-            if verbose: it = tqdm(annotations['images'], desc="Processing '{}'".format(os.path.basename(annotations_filename)), file=sys.stdout)
-            else: it = annotations['images']
-
-            # Loop over all images in this dataset.
-            for img in it:
-
-                self.filenames.append(os.path.join(images_dir, img['file_name']))
-                self.image_ids.append(img['id'])
-
-                if ground_truth_available:
-                    # Get all annotations for this image.
-                    annotations = image_ids_to_annotations[img['id']]
-                    boxes = []
-                    for annotation in annotations:
-                        cat_id = annotation['category_id']
-                        # Check if this class is supposed to be included in the dataset.
-                        if (not self.include_classes == 'all') and (not cat_id in self.include_classes): continue
-                        # Transform the original class ID to fit in the sequence of consecutive IDs.
-                        class_id = self.cats_to_classes[cat_id]
-                        xmin = annotation['bbox'][0]
-                        ymin = annotation['bbox'][1]
-                        width = annotation['bbox'][2]
-                        height = annotation['bbox'][3]
-                        # Compute `xmax` and `ymax`.
-                        xmax = xmin + width
-                        ymax = ymin + height
-                        item_dict = {'image_name': img['file_name'],
-                                     'image_id': img['id'],
-                                     'class_id': class_id,
-                                     'xmin': xmin,
-                                     'ymin': ymin,
-                                     'xmax': xmax,
-                                     'ymax': ymax}
-                        box = []
-                        for item in self.labels_output_format:
-                            box.append(item_dict[item])
-                        boxes.append(box)
-                    self.labels.append(boxes)
-
-        self.dataset_size = len(self.filenames)
-        self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32)
-        if self.load_images_into_memory:
-            self.images = []
-            if verbose: it = tqdm(self.filenames, desc='Loading images into memory', file=sys.stdout)
-            else: it = self.filenames
-            for filename in it:
-                with Image.open(filename) as image:
-                    self.images.append(np.array(image, dtype=np.uint8))
-
-        if ret:
-            return self.images, self.filenames, self.labels, self.image_ids
-
-    def create_hdf5_dataset(self,
-                            file_path='dataset.h5',
-                            resize=False,
-                            variable_image_size=True,
-                            verbose=True):
-        '''
-        Converts the currently loaded dataset into a HDF5 file. This HDF5 file contains all
-        images as uncompressed arrays in a contiguous block of memory, which allows for them
-        to be loaded faster. Such an uncompressed dataset, however, may take up considerably
-        more space on your hard drive than the sum of the source images in a compressed format
-        such as JPG or PNG.
-
-        It is recommended that you always convert the dataset into an HDF5 dataset if you
-        have enugh hard drive space since loading from an HDF5 dataset accelerates the data
-        generation noticeably.
-
-        Note that you must load a dataset (e.g. via one of the parser methods) before creating
-        an HDF5 dataset from it.
-
-        The created HDF5 dataset will remain open upon its creation so that it can be used right
-        away.
-
-        Arguments:
-            file_path (str, optional): The full file path under which to store the HDF5 dataset.
-                You can load this output file via the `DataGenerator` constructor in the future.
-            resize (tuple, optional): `False` or a 2-tuple `(height, width)` that represents the
-                target size for the images. All images in the dataset will be resized to this
-                target size before they will be written to the HDF5 file. If `False`, no resizing
-                will be performed.
-            variable_image_size (bool, optional): The only purpose of this argument is that its
-                value will be stored in the HDF5 dataset in order to be able to quickly find out
-                whether the images in the dataset all have the same size or not.
-            verbose (bool, optional): Whether or not prit out the progress of the dataset creation.
-
-        Returns:
-            None.
-        '''
-
-        self.hdf5_dataset_path = file_path
-
-        dataset_size = len(self.filenames)
-
-        # Create the HDF5 file.
-        hdf5_dataset = h5py.File(file_path, 'w')
-
-        # Create a few attributes that tell us what this dataset contains.
-        # The dataset will obviously always contain images, but maybe it will
-        # also contain labels, image IDs, etc.
-        hdf5_dataset.attrs.create(name='has_labels', data=False, shape=None, dtype=np.bool_)
-        hdf5_dataset.attrs.create(name='has_image_ids', data=False, shape=None, dtype=np.bool_)
-        hdf5_dataset.attrs.create(name='has_eval_neutral', data=False, shape=None, dtype=np.bool_)
-        # It's useful to be able to quickly check whether the images in a dataset all
-        # have the same size or not, so add a boolean attribute for that.
-        if variable_image_size and not resize:
-            hdf5_dataset.attrs.create(name='variable_image_size', data=True, shape=None, dtype=np.bool_)
-        else:
-            hdf5_dataset.attrs.create(name='variable_image_size', data=False, shape=None, dtype=np.bool_)
-
-        # Create the dataset in which the images will be stored as flattened arrays.
-        # This allows us, among other things, to store images of variable size.
-        hdf5_images = hdf5_dataset.create_dataset(name='images',
-                                                  shape=(dataset_size,),
-                                                  maxshape=(None),
-                                                  dtype=h5py.special_dtype(vlen=np.uint8))
-
-        # Create the dataset that will hold the image heights, widths and channels that
-        # we need in order to reconstruct the images from the flattened arrays later.
-        hdf5_image_shapes = hdf5_dataset.create_dataset(name='image_shapes',
-                                                        shape=(dataset_size, 3),
-                                                        maxshape=(None, 3),
-                                                        dtype=np.int32)
-
-        if not (self.labels is None):
-
-            # Create the dataset in which the labels will be stored as flattened arrays.
-            hdf5_labels = hdf5_dataset.create_dataset(name='labels',
-                                                      shape=(dataset_size,),
-                                                      maxshape=(None),
-                                                      dtype=h5py.special_dtype(vlen=np.int32))
-
-            # Create the dataset that will hold the dimensions of the labels arrays for
-            # each image so that we can restore the labels from the flattened arrays later.
-            hdf5_label_shapes = hdf5_dataset.create_dataset(name='label_shapes',
-                                                            shape=(dataset_size, 2),
-                                                            maxshape=(None, 2),
-                                                            dtype=np.int32)
-
-            hdf5_dataset.attrs.modify(name='has_labels', value=True)
-
-        if not (self.image_ids is None):
-
-            hdf5_image_ids = hdf5_dataset.create_dataset(name='image_ids',
-                                                         shape=(dataset_size,),
-                                                         maxshape=(None),
-                                                         dtype=h5py.special_dtype(vlen=str))
-
-            hdf5_dataset.attrs.modify(name='has_image_ids', value=True)
-
-        if not (self.eval_neutral is None):
-
-            # Create the dataset in which the labels will be stored as flattened arrays.
-            hdf5_eval_neutral = hdf5_dataset.create_dataset(name='eval_neutral',
-                                                            shape=(dataset_size,),
-                                                            maxshape=(None),
-                                                            dtype=h5py.special_dtype(vlen=np.bool_))
-
-            hdf5_dataset.attrs.modify(name='has_eval_neutral', value=True)
-
-        if verbose:
-            tr = trange(dataset_size, desc='Creating HDF5 dataset', file=sys.stdout)
-        else:
-            tr = range(dataset_size)
-
-        # Iterate over all images in the dataset.
-        for i in tr:
-
-            # Store the image.
-            with Image.open(self.filenames[i]) as image:
-
-                image = np.asarray(image, dtype=np.uint8)
-
-                # Make sure all images end up having three channels.
-                if image.ndim == 2:
-                    image = np.stack([image] * 3, axis=-1)
-                elif image.ndim == 3:
-                    if image.shape[2] == 1:
-                        image = np.concatenate([image] * 3, axis=-1)
-                    elif image.shape[2] == 4:
-                        image = image[:,:,:3]
-
-                if resize:
-                    image = cv2.resize(image, dsize=(resize[1], resize[0]))
-
-                # Flatten the image array and write it to the images dataset.
-                hdf5_images[i] = image.reshape(-1)
-                # Write the image's shape to the image shapes dataset.
-                hdf5_image_shapes[i] = image.shape
-
-            # Store the ground truth if we have any.
-            if not (self.labels is None):
-
-                labels = np.asarray(self.labels[i])
-                # Flatten the labels array and write it to the labels dataset.
-                hdf5_labels[i] = labels.reshape(-1)
-                # Write the labels' shape to the label shapes dataset.
-                hdf5_label_shapes[i] = labels.shape
-
-            # Store the image ID if we have one.
-            if not (self.image_ids is None):
-
-                hdf5_image_ids[i] = self.image_ids[i]
-
-            # Store the evaluation-neutrality annotations if we have any.
-            if not (self.eval_neutral is None):
-
-                hdf5_eval_neutral[i] = self.eval_neutral[i]
-
-        hdf5_dataset.close()
-        self.hdf5_dataset = h5py.File(file_path, 'r')
-        self.hdf5_dataset_path = file_path
-        self.dataset_size = len(self.hdf5_dataset['images'])
-        self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32) # Instead of shuffling the HDF5 dataset, we will shuffle this index list.
-
+    
+        #add subtraction mask
     def generate(self,
                  batch_size=32,
                  shuffle=True,
@@ -924,6 +741,10 @@ class DataGenerator:
             if 'matched_anchors' in returns:
                 warnings.warn("`label_encoder` is not an `SSDInputEncoder` object, therefore 'matched_anchors' is not a possible return, " +
                               "but you set `returns = {}`. The impossible returns will be `None`.".format(returns))
+        elif self.subs is None:
+            if any([ret in returns for ret in ['subtractions']]):
+                warnings.warn("Since no subtraction mask was given, 'subtractions' isn't possible returns, " +
+                              "but you set `returns = {}`. The impossible returns will be `None`.".format(returns))
 
         #############################################################################################
         # Do a few preparatory things like maybe shuffling the dataset initially.
@@ -963,6 +784,7 @@ class DataGenerator:
         while True:
 
             batch_X, batch_y = [], []
+            batch_subs = []
 
             if current >= self.dataset_size:
                 current = 0
@@ -998,11 +820,13 @@ class DataGenerator:
             print("batch_indices")
             print(batch_indices)
             print("shape of self.images")
-            if not (self.images is None):
+            if not (self.images is None):#in memory
                 print(self.images.shape)
 
                 for i in batch_indices:
                     batch_X.append(self.images[i])
+                if not (self.subs is None): #append subtractions
+                    batch_subs.append(self.subs[i])
                 if not (self.filenames is None):
                     batch_filenames = self.filenames[current:current+batch_size]
                 else:
@@ -1010,6 +834,8 @@ class DataGenerator:
             elif not (self.hdf5_dataset is None):
                 for i in batch_indices:
                     batch_X.append(self.hdf5_dataset['images'][i].reshape(self.hdf5_dataset['image_shapes'][i]))
+                if not (self.subs is None): #append subtractions
+                    batch_subs.append(self.subs[i])
                 if not (self.filenames is None):
                     batch_filenames = self.filenames[current:current+batch_size]
                 else:
@@ -1020,7 +846,7 @@ class DataGenerator:
                     with Image.open(filename) as image:
                         batch_X.append(np.array(image, dtype=np.uint8))
             print("This is image:"+str(batch_filenames))
-            print()
+            print("This is subtraction:"+str(batch_filenames)+'_sub')
             # Get the labels for this batch (if there are any).
             if not (self.labels is None):
                 batch_y = deepcopy(self.labels[current:current+batch_size])
@@ -1186,6 +1012,7 @@ class DataGenerator:
             if 'inverse_transform' in returns: ret.append(batch_inverse_transforms)
             if 'original_images' in returns: ret.append(batch_original_images)
             if 'original_labels' in returns: ret.append(batch_original_labels)
+            if 'subtractions' in returns: ret.append(batch_subs) #  add subtractions of this batch
             print(batch_y.shape)
             yield ret
 
