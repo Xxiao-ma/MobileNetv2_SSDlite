@@ -34,10 +34,6 @@ try:
 except ImportError:
     warnings.warn("'h5py' module is missing. The fast HDF5 dataset option will be unavailable.")
 try:
-    import json
-except ImportError:
-    warnings.warn("'json' module is missing. The JSON-parser will be unavailable.")
-try:
     from bs4 import BeautifulSoup
 except ImportError:
     warnings.warn("'BeautifulSoup' module is missing. The XML-parser will be unavailable.")
@@ -87,6 +83,7 @@ class DataGenerator:
                  labels=None,
                  image_ids=None,
                  eval_neutral=None,
+                 subtractions=None,
                  labels_output_format=('class_id', 'xmin', 'ymin', 'xmax', 'ymax'),
                  verbose=True):
         '''
@@ -146,6 +143,7 @@ class DataGenerator:
         self.load_images_into_memory = load_images_into_memory
         self.images = None # The only way that this list will not stay `None` is if `load_images_into_memory == True`.
         self.subs = None
+        #self.subtractions = None
         # `self.filenames` is a list containing all file names of the image samples (full paths).
         # Note that it does not contain the actual image files themselves. This list is one of the outputs of the parser methods.
         # In case you are loading an HDF5 dataset, this list will be `None`.
@@ -291,7 +289,7 @@ class DataGenerator:
                                                         maxshape=(None, 3),
                                                         dtype=np.int32)
 
-        if not (self.subs is None): # refer to subtraction
+        if not (self.subtractions is None): # refer to subtraction
 
             # Create the dataset in which the labels will be stored as flattened arrays.
             hdf5_subs = hdf5_dataset.create_dataset(name='subs',
@@ -301,7 +299,7 @@ class DataGenerator:
 
             # Create the dataset that will hold the dimensions of the labels arrays for
             # each image so that we can restore the labels from the flattened arrays later.
-            hdf5_subs_shapes = hdf5_dataset.create_dataset(name='sub_shapes',
+            hdf5_sub_shapes = hdf5_dataset.create_dataset(name='sub_shapes',
                                                             shape=(dataset_size, 3),
                                                             maxshape=(None, 3),
                                                             dtype=np.int32)
@@ -353,10 +351,37 @@ class DataGenerator:
         for i in tr:
 
             # Store the image.
+            #channel 1 is the grey scale image, channel 2 is the subtraction
+            image = cv2.imread(self.filenames[i],0)
+            if image is None:
+                raise ValueError("lack of image: "+str(self.filenames[i]))
+            image = np.expand_dims(image, axis=2)
+            sub = cv2.imread(self.subtractions[i],0)
+            if sub is None:
+                raise ValueError("lack of subtraction: "+str(self.subtractions[i]))
+            sub = np.expand_dims(sub, axis=2)
+            res = np.concatenate((image,sub),axis = 2)
+            #print("before resize: "+str(res.shape))
+            # Flatten the image array and write it to the images dataset.
+            hdf5_images[i] = res.reshape(-1)
+            # Write the image's shape to the image shapes dataset.
+            #print(res.shape(-1))
+            hdf5_image_shapes[i] = res.shape                
+
+            '''
             with Image.open(self.filenames[i]) as image:
-
+                
                 image = np.asarray(image, dtype=np.uint8)
-
+                test = np.array(image)
+                print(test.shape)
+                print(image.ndim)
+                testcv = cv2.imread(self.filenames[i],0)
+                print("shape of cv2 imread below")
+                print(testcv.shape)
+                testsub = cv2.imread(self.subtractions[i],0)
+                result = np.concatenate((testcv,testsub),axis=0)
+                #print("shape of concatenate: "+str(result.shape))
+                #print(result)
                 # Make sure all images end up having three channels.
                 if image.ndim == 2:
                     image = np.stack([image] * 3, axis=-1)
@@ -365,40 +390,17 @@ class DataGenerator:
                         image = np.concatenate([image] * 3, axis=-1)
                     elif image.shape[2] == 4:
                         image = image[:,:,:3]
-
+                
                 if resize:
                     image = cv2.resize(image, dsize=(resize[1], resize[0]))
-
+                print("before resize: "+str(image.shape))
                 # Flatten the image array and write it to the images dataset.
                 hdf5_images[i] = image.reshape(-1)
                 # Write the image's shape to the image shapes dataset.
+                print(image.shape)
                 hdf5_image_shapes[i] = image.shape
+            '''
 
-
-            # Store subtractions
-            if not (self.subtractions is None):
-
-
-                with Image.open(self.subtractions[i]) as sub:
-
-                sub = np.asarray(sub, dtype=np.uint8)
-
-                # Make sure all images end up having three channels.
-                # if image.ndim == 2:
-                #     image = np.stack([image] * 3, axis=-1)
-                # elif image.ndim == 3:
-                #     if image.shape[2] == 1:
-                #         image = np.concatenate([image] * 3, axis=-1)
-                #     elif image.shape[2] == 4:
-                #         image = image[:,:,:3]
-
-                if resize:
-                    sub = cv2.resize(sub, dsize=(resize[1], resize[0]))
-
-                # Flatten the image array and write it to the images dataset.
-                hdf5_subs[i] = sub.reshape(-1)
-                # Write the image's shape to the image shapes dataset.
-                hdf5_sub_shapes[i] = sub.shape
 
 
             # Store the ground truth if we have any.
@@ -452,16 +454,6 @@ class DataGenerator:
             else: tr = range(self.dataset_size)
             for i in tr:
                 self.images.append(self.hdf5_dataset['images'][i].reshape(self.hdf5_dataset['image_shapes'][i]))
-
-        #add subtractions
-        if self.hdf5_dataset.attrs['has_subs']:
-            self.subs = []
-            subs = self.hdf5_dataset['subs']
-            sub_shapes = self.hdf5_dataset['sub_shapes']
-            if verbose: tr = trange(self.dataset_size, desc='Loading subtractions', file=sys.stdout)
-            else: tr = range(self.dataset_size)
-            for i in tr:
-                self.subs.append(subs[i].reshape(sub_shapes[i]))
 
         if self.hdf5_dataset.attrs['has_labels']:
             self.labels = []
@@ -546,32 +538,39 @@ class DataGenerator:
         self.filenames = []
         self.image_ids = []
         self.labels = []
-        self.subtractions = [] # add subtraction list
+        self.subtractions = [] # add subtraction name list
         self.eval_neutral = []
         if not annotations_dirs:
             self.labels = None
             self.eval_neutral = None
             annotations_dirs = [None] * len(images_dirs)
         names =set()
+
+        
+
         for images_dir, image_set_filename, annotations_dir in zip(images_dirs, image_set_filenames, annotations_dirs):
             # Read the image set file that so that we know all the IDs of all the images to be included in the dataset.
             with open(image_set_filename) as f:
                 image_ids = [line.strip() for line in f] # Note: These are strings, not integers.
                 self.image_ids += image_ids
 
-            if verbose: it = (image_ids, desc="Processing image set '{}'".format(os.path.basename(image_set_filename)), file=sys.stdout)
-            else: it = image_ids
+            if verbose:
+                it = tqdm(image_ids, desc="Processing image set '{}'".format(os.path.basename(image_set_filename)), file=sys.stdout)
+            else: 
+                it = image_ids
 
             # Loop over all images in this dataset.
             for image_id in it:
 
                 filename = '{}'.format(image_id) + '.pgm' #改变为pgm
-                subtraction = '{}'.format(image_id) + '_sub.pgm' # set id of subtraction masks
+                subtraction = '{}'.format(image_id) + '_sub.jpg' # set id of subtraction masks
+                #print(filename)
+                #print(subtraction)# use for debug
                 self.filenames.append(os.path.join(images_dir, filename))
                 self.subtractions.append(os.path.join(images_dir, subtraction))  # add background subtraction image
-
+                
+                # Parse the XML file for this image.
                 if not annotations_dir is None:
-                    # Parse the XML file for this image.
                     with open(os.path.join(annotations_dir, image_id + '.xml')) as f:
                         soup = BeautifulSoup(f, 'xml')
 
@@ -741,10 +740,6 @@ class DataGenerator:
             if 'matched_anchors' in returns:
                 warnings.warn("`label_encoder` is not an `SSDInputEncoder` object, therefore 'matched_anchors' is not a possible return, " +
                               "but you set `returns = {}`. The impossible returns will be `None`.".format(returns))
-        elif self.subs is None:
-            if any([ret in returns for ret in ['subtractions']]):
-                warnings.warn("Since no subtraction mask was given, 'subtractions' isn't possible returns, " +
-                              "but you set `returns = {}`. The impossible returns will be `None`.".format(returns))
 
         #############################################################################################
         # Do a few preparatory things like maybe shuffling the dataset initially.
@@ -784,7 +779,6 @@ class DataGenerator:
         while True:
 
             batch_X, batch_y = [], []
-            batch_subs = []
 
             if current >= self.dataset_size:
                 current = 0
@@ -831,9 +825,15 @@ class DataGenerator:
                     batch_filenames = self.filenames[current:current+batch_size]
                 else:
                     batch_filenames = None
-            elif not (self.hdf5_dataset is None):
+            elif not (self.hdf5_dataset is None): #basically in use
                 for i in batch_indices:
+                    test = self.hdf5_dataset['images'][i].reshape(self.hdf5_dataset['image_shapes'][i])
+                    # use for debug
+                    #print("shape of reform picture from hdf5: "+ str(test.shape))
+                    #print("origin: "+str(test[:,:,0])+'\n')
+                    #print("subtraction: "+str(test[:,:,1])+'\n')
                     batch_X.append(self.hdf5_dataset['images'][i].reshape(self.hdf5_dataset['image_shapes'][i]))
+
                 if not (self.subs is None): #append subtractions
                     batch_subs.append(self.subs[i])
                 if not (self.filenames is None):
@@ -1016,36 +1016,7 @@ class DataGenerator:
             print(batch_y.shape)
             yield ret
 
-    def save_dataset(self,
-                     filenames_path='filenames.pkl',
-                     labels_path=None,
-                     image_ids_path=None,
-                     eval_neutral_path=None):
-        '''
-        Writes the current `filenames`, `labels`, and `image_ids` lists to the specified files.
-        This is particularly useful for large datasets with annotations that are
-        parsed from XML files, which can take quite long. If you'll be using the
-        same dataset repeatedly, you don't want to have to parse the XML label
-        files every time.
-
-        Arguments:
-            filenames_path (str): The path under which to save the filenames pickle.
-            labels_path (str): The path under which to save the labels pickle.
-            image_ids_path (str, optional): The path under which to save the image IDs pickle.
-            eval_neutral_path (str, optional): The path under which to save the pickle for
-                the evaluation-neutrality annotations.
-        '''
-        with open(filenames_path, 'wb') as f:
-            pickle.dump(self.filenames, f)
-        if not labels_path is None:
-            with open(labels_path, 'wb') as f:
-                pickle.dump(self.labels, f)
-        if not image_ids_path is None:
-            with open(image_ids_path, 'wb') as f:
-                pickle.dump(self.image_ids, f)
-        if not eval_neutral_path is None:
-            with open(eval_neutral_path, 'wb') as f:
-                pickle.dump(self.eval_neutral, f)
+    
 
     def get_dataset(self):
         '''
@@ -1053,7 +1024,7 @@ class DataGenerator:
             4-tuple containing lists and/or `None` for the filenames, labels, image IDs,
             and evaluation-neutrality annotations.
         '''
-        return self.filenames, self.labels, self.image_ids, self.eval_neutral
+        return self.filenames, self.labels, self.image_ids, self.eval_neutral, self.subtractions
 
     def get_dataset_size(self):
         '''
