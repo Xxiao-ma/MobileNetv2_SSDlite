@@ -214,7 +214,6 @@ class SSDDataAugmentation:
     def __init__(self,
                  img_height=300,
                  img_width=300,
-                 background=(123, 117, 104),
                  labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
         '''
         Arguments:
@@ -230,9 +229,9 @@ class SSDDataAugmentation:
         self.labels_format = labels_format
 
         self.photometric_distortions = SSDPhotometricDistortions()
-        self.expand = SSDExpand(background=background, labels_format=self.labels_format)
+        #self.expand = SSDExpand(background=background, labels_format=self.labels_format)
         self.random_crop = SSDRandomCrop(labels_format=self.labels_format)
-        self.random_flip = RandomFlip(dim='horizontal', prob=0.5, labels_format=self.labels_format)
+        self.random_flip = RandomFlip(dim='horizontal', prob=0, labels_format=self.labels_format)#prob used to be 0.5
 
         # This box filter makes sure that the resized images don't contain any degenerate boxes.
         # Resizing the images could lead the boxes to becomes smaller. For boxes that are already
@@ -254,13 +253,12 @@ class SSDDataAugmentation:
                                          labels_format=self.labels_format)
 
         self.sequence = [self.photometric_distortions,
-                         self.expand,
                          self.random_crop,
                          self.random_flip,
                          self.resize]
 
     def __call__(self, image, labels, return_inverter=False):
-        self.expand.labels_format = self.labels_format
+        #self.expand.labels_format = self.labels_format
         self.random_crop.labels_format = self.labels_format
         self.random_flip.labels_format = self.labels_format
         self.resize.labels_format = self.labels_format

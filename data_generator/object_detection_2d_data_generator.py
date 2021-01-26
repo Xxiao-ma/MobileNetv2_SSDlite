@@ -1,21 +1,3 @@
-'''
-A data generator for 2D object detection.
-
-Copyright (C) 2018 Pierluigi Ferrari
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-'''
-
 from __future__ import division
 import numpy as np
 import inspect
@@ -66,14 +48,11 @@ class DatasetError(Exception):
 class DataGenerator:
     '''
     A generator to generate batches of samples and corresponding labels indefinitely.
-
     Can shuffle the dataset consistently after each complete pass.
-
     Currently provides three methods to parse annotation data: A general-purpose CSV parser,
     an XML parser for the Pascal VOC datasets, and a JSON parser for the MS COCO datasets.
     If the annotations of your dataset are in a format that is not supported by these parsers,
     you could just add another parser method and still use this generator.
-
     Can perform image transformations for data conversion and data augmentation,
     for details please refer to the documentation of the `generate()` method.
     '''
@@ -92,7 +71,6 @@ class DataGenerator:
         '''
         Initializes the data generator. You can either load a dataset directly here in the constructor,
         e.g. an HDF5 dataset, or you can use one of the parser methods to read in a dataset.
-
         Arguments:
             load_images_into_memory (bool, optional): If `True`, the entire dataset will be loaded into memory.
                 This enables noticeably faster data generation than loading batches of images into memory ad hoc.
@@ -219,11 +197,9 @@ class DataGenerator:
         '''
         Loads an HDF5 dataset that is in the format that the `create_hdf5_dataset()` method
         produces.
-
         Arguments:
             verbose (bool, optional): If `True`, prints out the progress while loading
                 the dataset.
-
         Returns:
             None.
         '''
@@ -298,7 +274,6 @@ class DataGenerator:
                 of its boxes.
             ret (bool, optional): Whether or not to return the outputs of the parser.
             verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
-
         Returns:
             None by default, optionally lists for whichever are available of images, image filenames, labels, and image IDs.
         '''
@@ -415,7 +390,6 @@ class DataGenerator:
         '''
         This is an XML parser for the Pascal VOC datasets. It might be applicable to other datasets with minor changes to
         the code, but in its current form it expects the data format and XML tags of the Pascal VOC datasets.
-
         Arguments:
             images_dirs (list): A list of strings, where each string is the path of a directory that
                 contains images that are to be part of the dataset. This allows you to aggregate multiple datasets
@@ -438,7 +412,6 @@ class DataGenerator:
             exclude_difficult (bool, optional): If `True`, excludes boxes that are labeled as 'difficult'.
             ret (bool, optional): Whether or not to return the outputs of the parser.
             verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
-
         Returns:
             None by default, optionally lists for whichever are available of images, image filenames, labels, image IDs,
             and a list indicating which boxes are annotated with the label "difficult".
@@ -459,7 +432,7 @@ class DataGenerator:
             self.labels = None
             self.eval_neutral = None
             annotations_dirs = [None] * len(images_dirs)
-        names =set()
+
         for images_dir, image_set_filename, annotations_dir in zip(images_dirs, image_set_filenames, annotations_dirs):
             # Read the image set file that so that we know all the IDs of all the images to be included in the dataset.
             with open(image_set_filename) as f:
@@ -472,11 +445,12 @@ class DataGenerator:
             # Loop over all images in this dataset.
             for image_id in it:
 
-                filename = '{}'.format(image_id) + '.pgm'#改变为pgm
+                filename = '{}'.format(image_id) + '.pgm'
                 self.filenames.append(os.path.join(images_dir, filename))
 
                 if not annotations_dir is None:
                     # Parse the XML file for this image.
+                    print(image_id)
                     with open(os.path.join(annotations_dir, image_id + '.xml')) as f:
                         soup = BeautifulSoup(f, 'xml')
 
@@ -486,11 +460,10 @@ class DataGenerator:
                     boxes = [] # We'll store all boxes for this image here.
                     eval_neutr = [] # We'll store whether a box is annotated as "difficult" here.
                     objects = soup.find_all('object') # Get a list of all objects in this image.
+
                     # Parse the data for each object.
                     for obj in objects:
                         class_name = obj.find('name', recursive=False).text
-                        names.add(class_name)
-                        #print(class_name)
                         class_id = self.classes.index(class_name)
                         # Check whether this class is supposed to be included in the dataset.
                         if (not self.include_classes == 'all') and (not class_id in self.include_classes): continue
@@ -523,16 +496,10 @@ class DataGenerator:
                         boxes.append(box)
                         if difficult: eval_neutr.append(True)
                         else: eval_neutr.append(False)
-                    #f = open('./test.txt','w')
-                    #f.write(str(names))
-                    #f.close()
- 
-                    #print(names)
+
                     self.labels.append(boxes)
                     self.eval_neutral.append(eval_neutr)
-        #f = open('./test.txt','w')
-        #f.write(str(names))
-        #f.close()
+
         self.dataset_size = len(self.filenames)
         self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32)
         if self.load_images_into_memory:
@@ -556,7 +523,6 @@ class DataGenerator:
         '''
         This is an JSON parser for the MS COCO datasets. It might be applicable to other datasets with minor changes to
         the code, but in its current form it expects the JSON format of the MS COCO datasets.
-
         Arguments:
             images_dirs (list, optional): A list of strings, where each string is the path of a directory that
                 contains images that are to be part of the dataset. This allows you to aggregate multiple datasets
@@ -573,7 +539,6 @@ class DataGenerator:
                 are to be included in the dataset. If 'all', all ground truth boxes will be included in the dataset.
             ret (bool, optional): Whether or not to return the outputs of the parser.
             verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
-
         Returns:
             None by default, optionally lists for whichever are available of images, image filenames, labels and image IDs.
         '''
@@ -682,17 +647,13 @@ class DataGenerator:
         to be loaded faster. Such an uncompressed dataset, however, may take up considerably
         more space on your hard drive than the sum of the source images in a compressed format
         such as JPG or PNG.
-
         It is recommended that you always convert the dataset into an HDF5 dataset if you
         have enugh hard drive space since loading from an HDF5 dataset accelerates the data
         generation noticeably.
-
         Note that you must load a dataset (e.g. via one of the parser methods) before creating
         an HDF5 dataset from it.
-
         The created HDF5 dataset will remain open upon its creation so that it can be used right
         away.
-
         Arguments:
             file_path (str, optional): The full file path under which to store the HDF5 dataset.
                 You can load this output file via the `DataGenerator` constructor in the future.
@@ -704,7 +665,6 @@ class DataGenerator:
                 value will be stored in the HDF5 dataset in order to be able to quickly find out
                 whether the images in the dataset all have the same size or not.
             verbose (bool, optional): Whether or not prit out the progress of the dataset creation.
-
         Returns:
             None.
         '''
@@ -836,20 +796,17 @@ class DataGenerator:
 
     def generate(self,
                  batch_size=32,
-                 shuffle=True,
+                 shuffle=False,
                  transformations=[],
                  label_encoder=None,
                  returns={'processed_images', 'encoded_labels'},
-                 keep_images_without_gt=False,
+                 keep_images_without_gt=True,
                  degenerate_box_handling='remove'):
         '''
         Generates batches of samples and (optionally) corresponding labels indefinitely.
-
         Can shuffle the samples consistently after each complete pass.
-
         Optionally takes a list of arbitrary image transformations to apply to the
         samples ad hoc.
-
         Arguments:
             batch_size (int, optional): The size of the batches to be generated.
             shuffle (bool, optional): Whether or not to shuffle the dataset before each pass.
@@ -867,7 +824,15 @@ class DataGenerator:
                 is always a tuple that contains the outputs specified in this set and only those. If an output is not available,
                 it will be `None`. The output tuple can contain the following outputs according to the specified keyword strings:
                 * 'processed_images': An array containing the processed images. Will always be in the outputs, so it doesn't
-                    matter whether or not yolabelsy with all ground truth boxes for that image. Only available if ground truth is available.
+                    matter whether or not you include this keyword in the set.
+                * 'encoded_labels': The encoded labels tensor. Will always be in the outputs if a label encoder is given,
+                    so it doesn't matter whether or not you include this keyword in the set if you pass a label encoder.
+                * 'matched_anchors': Only available if `labels_encoder` is an `SSDInputEncoder` object. The same as 'encoded_labels',
+                    but containing anchor box coordinates for all matched anchor boxes instead of ground truth coordinates.
+                    This can be useful to visualize what anchor boxes are being matched to each ground truth box. Only available
+                    in training mode.
+                * 'processed_labels': The processed, but not yet encoded labels. This is a list that contains for each
+                    batch image a Numpy array with all ground truth boxes for that image. Only available if ground truth is available.
                 * 'filenames': A list containing the file names (full paths) of the images in the batch.
                 * 'image_ids': A list containing the integer IDs of the images in the batch. Only available if there
                     are image IDs available.
@@ -900,7 +865,6 @@ class DataGenerator:
                 transformations have been applied (if any), but before the labels were passed to the `label_encoder` (if one was given).
                 Can be one of 'warn' or 'remove'. If 'warn', the generator will merely print a warning to let you know that there
                 are degenerate boxes in a batch. If 'remove', the generator will remove degenerate boxes from the batch silently.
-
         Yields:
             The next batch as a tuple of items as defined by the `returns` argument.
         '''
@@ -995,16 +959,14 @@ class DataGenerator:
             # 3) Else, if we have neither of the above, we'll have to load the individual image
             #    files from disk.
             batch_indices = self.dataset_indices[current:current+batch_size]
-            print("batch_indices")
-            print(batch_indices)
-            print("shape of self.images")
             if not (self.images is None):
-                print(self.images.shape)
-
                 for i in batch_indices:
+                    if i == 2 or i =='2':
+                        print(self.filenames)
                     batch_X.append(self.images[i])
                 if not (self.filenames is None):
                     batch_filenames = self.filenames[current:current+batch_size]
+                    #print(batch_filenames)
                 else:
                     batch_filenames = None
             elif not (self.hdf5_dataset is None):
@@ -1018,9 +980,9 @@ class DataGenerator:
                 batch_filenames = self.filenames[current:current+batch_size]
                 for filename in batch_filenames:
                     with Image.open(filename) as image:
+                        #print(self.filenames)
                         batch_X.append(np.array(image, dtype=np.uint8))
-            print("This is image:"+str(batch_filenames))
-            print()
+
             # Get the labels for this batch (if there are any).
             if not (self.labels is None):
                 batch_y = deepcopy(self.labels[current:current+batch_size])
@@ -1053,17 +1015,16 @@ class DataGenerator:
             batch_inverse_transforms = []
 
             for i in range(len(batch_X)):
-                
-                if self.labels is None:
-                    print("this image "+str(i)+"has no labels")
+
                 if not (self.labels is None):
-                    
                     # Convert the labels for this image to an array (in case they aren't already).
                     batch_y[i] = np.array(batch_y[i])
                     # If this image has no ground truth boxes, maybe we don't want to keep it in the batch.
+                    if batch_y[i].size == 0:
+                        print('this empty batch y is :')
+                        print(i)
+                        print(batch_filenames[i])
                     if (batch_y[i].size == 0) and not keep_images_without_gt:
-                        print("the image "+str(i)+" has no ground truth")
-
                         batch_items_to_remove.append(i)
                         batch_inverse_transforms.append([])
                         continue
@@ -1076,15 +1037,27 @@ class DataGenerator:
                     for transform in transformations:
 
                         if not (self.labels is None):
+                            if len(batch_y[i])==0: # In case the transform failed to produce an output image, which is possible for some random transforms.
+                                #batch_items_to_remove.append(i)
+                                #batch_inverse_transforms.append([])
+                                batch_X[i] = transform(batch_X[i])
+                                continue
 
                             if ('inverse_transform' in returns) and ('return_inverter' in inspect.signature(transform).parameters):
                                 batch_X[i], batch_y[i], inverse_transform = transform(batch_X[i], batch_y[i], return_inverter=True)
                                 inverse_transforms.append(inverse_transform)
                             else:
+                                print("this is batch :")
+                                print(batch_filenames[i])
+                                print(i)
+                                print('***this is batch x ***')
+                                print(batch_X[i])
+                                print('***this is batch y ***')
+                                print(batch_y[i])
+                            
                                 batch_X[i], batch_y[i] = transform(batch_X[i], batch_y[i])
 
                             if batch_X[i] is None: # In case the transform failed to produce an output image, which is possible for some random transforms.
-                                print("the image "+str(i)+" in batch is empty")
                                 batch_items_to_remove.append(i)
                                 batch_inverse_transforms.append([])
                                 continue
@@ -1104,25 +1077,25 @@ class DataGenerator:
                 #########################################################################################
 
                 if not (self.labels is None):
+                    if len(batch_y[i])== 0 :
+                        continue
+                    else:
+                        xmin = self.labels_format['xmin']
+                        ymin = self.labels_format['ymin']
+                        xmax = self.labels_format['xmax']
+                        ymax = self.labels_format['ymax']
 
-                    xmin = self.labels_format['xmin']
-                    ymin = self.labels_format['ymin']
-                    xmax = self.labels_format['xmax']
-                    ymax = self.labels_format['ymax']
-
-                    if np.any(batch_y[i][:,xmax] - batch_y[i][:,xmin] <= 0) or np.any(batch_y[i][:,ymax] - batch_y[i][:,ymin] <= 0):
-                        if degenerate_box_handling == 'warn':
-                            warnings.warn("Detected degenerate ground truth bounding boxes for batch item {} with bounding boxes {}, ".format(i, batch_y[i]) +
-                                          "i.e. bounding boxes where xmax <= xmin and/or ymax <= ymin. " +
-                                          "This could mean that your dataset contains degenerate ground truth boxes, or that any image transformations you may apply might " +
-                                          "result in degenerate ground truth boxes, or that you are parsing the ground truth in the wrong coordinate format." +
-                                          "Degenerate ground truth bounding boxes may lead to NaN errors during the training.")
-                        elif degenerate_box_handling == 'remove':
-                            batch_y[i] = box_filter(batch_y[i])
-                            if (batch_y[i].size == 0) and not keep_images_without_gt:
-                                print("the image "+str(i)+" has label , whose length is 0")
-
-                                batch_items_to_remove.append(i)
+                        if np.any(batch_y[i][:,xmax] - batch_y[i][:,xmin] <= 0) or np.any(batch_y[i][:,ymax] - batch_y[i][:,ymin] <= 0):
+                            if degenerate_box_handling == 'warn':
+                                warnings.warn("Detected degenerate ground truth bounding boxes for batch item {} with bounding boxes {}, ".format(i, batch_y[i]) +
+                                            "i.e. bounding boxes where xmax <= xmin and/or ymax <= ymin. " +
+                                            "This could mean that your dataset contains degenerate ground truth boxes, or that any image transformations you may apply might " +
+                                            "result in degenerate ground truth boxes, or that you are parsing the ground truth in the wrong coordinate format." +
+                                            "Degenerate ground truth bounding boxes may lead to NaN errors during the training.")
+                            elif degenerate_box_handling == 'remove':
+                                batch_y[i] = box_filter(batch_y[i])
+                                if (batch_y[i].size == 0) and not keep_images_without_gt:
+                                    batch_items_to_remove.append(i)
 
             #########################################################################################
             # Remove any items we might not want to keep from the batch.
@@ -1145,15 +1118,14 @@ class DataGenerator:
             # CAUTION: Converting `batch_X` into an array will result in an empty batch if the images have varying sizes
             #          or varying numbers of channels. At this point, all images must have the same size and the same
             #          number of channels.
-            print("this is the batch size")
-            print(len(batch_X))
-            #print(batch_X)
             batch_X = np.array(batch_X)
             if (batch_X.size == 0):
-                raise DegenerateBatchError("You produced an empty batch. This might be because the images in the batch vary " +
-                                           "in their size and/or number of channels. Note that after all transformations " +
-                                           "(if any were given) have been applied to all images in the batch, all images " +
-                                           "must be homogenous in size along all axes.")
+                print('this is a empty batch')
+                #batch_filenames=self.filenames[current:current+batch_size]
+                # raise DegenerateBatchError("You produced an empty batch. This might be because the images in the batch vary " +
+                #                            "in their size and/or number of channels. Note that after all transformations " +
+                #                            "(if any were given) have been applied to all images in the batch, all images " +
+                #                            "must be homogenous in size along all axes.")
 
             #########################################################################################
             # If we have a label encoder, encode our labels.
@@ -1186,7 +1158,7 @@ class DataGenerator:
             if 'inverse_transform' in returns: ret.append(batch_inverse_transforms)
             if 'original_images' in returns: ret.append(batch_original_images)
             if 'original_labels' in returns: ret.append(batch_original_labels)
-            print(batch_y.shape)
+
             yield ret
 
     def save_dataset(self,
@@ -1200,7 +1172,6 @@ class DataGenerator:
         parsed from XML files, which can take quite long. If you'll be using the
         same dataset repeatedly, you don't want to have to parse the XML label
         files every time.
-
         Arguments:
             filenames_path (str): The path under which to save the filenames pickle.
             labels_path (str): The path under which to save the labels pickle.

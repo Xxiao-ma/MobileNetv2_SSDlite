@@ -162,7 +162,10 @@ class AnchorBoxes(Layer):
 
         # We need the shape of the input tensor
         if K.image_dim_ordering() == 'tf':
-            batch_size, feature_map_height, feature_map_width, feature_map_channels = x._keras_shape
+            batch_size, feature_map_height, feature_map_width, feature_map_channels = x.shape.as_list()#x._keras_shape
+            # In Lstm case and none timedistributed layer added
+            # batch_size, timestep, feature_map_height, feature_map_width, feature_map_channels = x.shape#x._keras_shape
+
         # Not yet relevant since TensorFlow is the only supported backend right now,
         # but it can't harm to have this in here for the future
         else:
@@ -195,7 +198,7 @@ class AnchorBoxes(Layer):
                 offset_width = self.this_offsets
         # Now that we have the offsets and step sizes, compute the grid of anchor box center points.
         cy = np.linspace(offset_height * step_height,
-                         (offset_height + feature_map_height - 1) * step_height, feature_map_height)
+                         (float(offset_height) + float(feature_map_height) - 1) * step_height, feature_map_height)
         cx = np.linspace(offset_width * step_width,
                          (offset_width + feature_map_width - 1) * step_width, feature_map_width)
         cx_grid, cy_grid = np.meshgrid(cx, cy)
