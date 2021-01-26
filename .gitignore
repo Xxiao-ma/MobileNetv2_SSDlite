@@ -1,0 +1,15 @@
+#train data
+*.xml
+*.pgm
+
+#weight file
+*.h5
+#config file
+*.csv
+
+#temporary file
+*.pyc
+
+#some local files
+
+

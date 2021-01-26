@@ -7,7 +7,7 @@ import keras.backend as K
 from layers.AnchorBoxesLayer import AnchorBoxes
 from layers.DecodeDetectionsLayer import DecodeDetections
 from layers.DecodeDetectionsFastLayer import DecodeDetectionsFast
-from models.graphs.mobilenet_v2_ssdlite_praph_modi import mobilenet_v2_ssdlite
+from models.graphs.mobilenet_v2_ssdlite_praph_subtraction_add_s3b1 import mobilenet_v2_ssdlite
 
 
 def predict_block(inputs, out_channel, sym, id):

@@ -1,22 +1,3 @@
-'''
-Various geometric image transformations for 2D object detection, both deterministic
-and probabilistic.
-
-Copyright (C) 2018 Pierluigi Ferrari
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-'''
-
 from __future__ import division
 import numpy as np
 import cv2
@@ -78,13 +59,20 @@ class Resize:
                 labels[:, [xmin+1, xmax+1]] = np.round(labels[:, [xmin+1, xmax+1]] * (img_width / self.out_width), decimals=0)
                 return labels
 
-        if labels is None:
+        print("this is labels in geometric ops, is that None? ")
+        print(labels)
+        print(labels is None)
+        print(len(labels))
+
+        if len(labels) == 0 :
             if return_inverter:
                 return image, inverter
             else:
                 return image
         else:
+
             labels = np.copy(labels)
+            
             labels[:, [ymin, ymax]] = np.round(labels[:, [ymin, ymax]] * (self.out_height / img_height), decimals=0)
             labels[:, [xmin, xmax]] = np.round(labels[:, [xmin, xmax]] * (self.out_width / img_width), decimals=0)
 
@@ -97,9 +85,6 @@ class Resize:
             if return_inverter:
                 return image, labels, inverter
             else:
-                #add for debug
-                print('here in resize function:image.shape and labels')
-                print(image.shape,labels)
                 return image, labels
 
 class ResizeRandomInterp:
@@ -420,8 +405,9 @@ class RandomTranslate:
                 dx = np.random.choice([-dx_abs, dx_abs])
                 self.translate.dy_rel = dy
                 self.translate.dx_rel = dx
-
+                
                 if (labels is None) or (self.image_validator is None):
+                    
                     # We either don't have any boxes or if we do, we will accept any outcome as valid.
                     return self.translate(image, labels)
                 else:
