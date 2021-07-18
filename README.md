@@ -35,11 +35,14 @@ Due to the limitation of the lightweight detection model, the model can sometime
 
 ## How to use the tracker?
 configureable parameters:
-- visualisation: turn on to see the 
-- saveTrackerVisulisation: save the pictures with tracked bounding box as well as the object id.
+- visualisation: turn on to see the live tracking results, default is 'False'.
+- saveTrackerVisulisation: save the pictures with tracked bounding box as well as the object id, default is 'True'.
 - saveXml: Store the track statistic result into xml file.
 - threshold: the threshold of a minimal lasting time to filter random false positive sequences, default is 3.
 - inferenceMode: default is 'True', used for normal use case with inference results from detection model; set 'Faulse' to debug the tracker use random generated data.
 ### 1. Configure the path of inference labels and pictures:
 - dir_path: This is the path to the folder you save the all segmented sequences.(The folders is named following the name rules)
 - inferenceResultDir: The folder where all inference results are saved.
+
+### 2. Run Countin_test.py to get the results.
+The counting results for each sequence will be saved into the file 'count_result.xls' at the same folder of the Countin_test.py, if the saveXml is 'True'.
