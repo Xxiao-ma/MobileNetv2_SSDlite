@@ -45,4 +45,4 @@ configureable parameters:
 - inferenceResultDir: The folder where all inference results are saved.
 
 ### 2. Run Countin_test.py to get the results.
-The counting results for each sequence will be saved into the file 'count_result.xls' at the same folder of the Countin_test.py, if the saveXml is 'True'.
+- The counting results for each sequence will be saved into the file 'count_result.xls' at the same folder of the Countin_test.py, if the saveXml is 'True'.
